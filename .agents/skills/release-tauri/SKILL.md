@@ -20,13 +20,13 @@ This skill cuts Tauri-edition releases only. Tauri stays on version lane `0.6.x`
 
 ### 1. Determine New Version
 
-- Read the current version from `package.json` and the latest git tag.
+- Read the current version from `package.json` and the latest **Tauri** tag: `git tag --list 'v0.6.*' --sort=-v:refname | head -1`. Do not use the repo-wide "latest tag" - it may now be a Swift `0.7.x` pre-release, which would skew the proposed version.
 - Tauri is frozen on the `0.6.x` lane, so only **patch** bumps are allowed (e.g. `0.6.27` -> `0.6.28`). Do NOT do a minor or major bump: from `0.6.x` that produces `0.7.0`, which collides with Swift's lane and can hijack GitHub Latest. (Swift releases use the release-swift skill on the `swift` branch.)
 - Show the proposed new version and **confirm with the user** before proceeding.
 
 ### 2. Generate Changelog
 
-Collect commits since the previous tag and build the changelog:
+Collect commits since the previous Tauri tag (the latest `v0.6.*` tag from step 1, not the repo-wide latest tag, which may be a Swift `0.7.x` release) and build the changelog:
 
 **Categorization rules:**
 
@@ -90,7 +90,7 @@ git push origin v{new_version}
 
 ### 7. Verify and publish (mandatory - never leave a draft)
 
-`tauri-action` creates the GitHub Release as a draft and only flips it to published when every matrix job (aarch64 + x86_64) completes. A failed, cancelled, or re-run job - or a manual `gh release create` racing CI - leaves an orphan draft. (This is why the repo had stale drafts for v0.6.1 and v0.6.8.) Always finish a release with:
+`publish.yml` runs `tauri-action` with `releaseDraft: false`, so a clean run publishes the release immediately. Drafts still slip through in practice: an interrupted, failed, or re-run matrix job (aarch64 + x86_64), or a manual `gh release create` racing CI, can leave an orphan draft for the tag. (This is how the repo ended up with stale drafts for v0.6.1 and v0.6.8.) So always finish a release by verifying it is actually published:
 
 ```bash
 gh run watch
