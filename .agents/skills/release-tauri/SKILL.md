@@ -1,15 +1,20 @@
 ---
-name: release-tag
+name: release-tauri
 description: >-
-  Create a new release tag with version bump, generate a GitHub Release-style
-  changelog, update CHANGELOG.md, and publish a GitHub Release. Use when the
-  user asks to tag a release, bump the version, create a changelog, cut a
-  release, or publish release notes.
+  Cut a release of the Tauri edition of OpenUsage (main branch): version bump,
+  generate a GitHub Release-style changelog, update CHANGELOG.md, and publish a
+  GitHub Release. Use when the user asks to tag a Tauri release, bump the
+  version, create a changelog, cut a release, or publish release notes. Pairs
+  with release-swift (the native Swift edition on the swift branch).
 ---
 
-# Release Tag
+# Release Tauri
 
-Bump the project version, generate a categorized changelog with author attribution, tag the release, and publish to GitHub Releases.
+Bump the project version, generate a categorized changelog with author attribution, tag the release, and publish to GitHub Releases. This skill cuts the Tauri edition only.
+
+## Lane and scope
+
+This skill cuts Tauri-edition releases only. Tauri stays on version lane `0.6.x`; never bump to `0.7.x` (Swift's lane). The Tauri edition is frozen - in practice the next release is the final "goodbye" build with the retirement banner. The native Swift edition has its own skill (release-swift) on the `swift` branch.
 
 ## Workflow
 
@@ -83,16 +88,27 @@ git push origin {branch}
 git push origin v{new_version}
 ```
 
-### 7. Create GitHub Release
+### 7. Verify and publish (mandatory - never leave a draft)
 
-Do **not** create the release before the push — CI (e.g. tauri-action) may create its own release when it sees the tag. After the push, check whether the release already exists:
+`tauri-action` creates the GitHub Release as a draft and only flips it to published when every matrix job (aarch64 + x86_64) completes. A failed, cancelled, or re-run job - or a manual `gh release create` racing CI - leaves an orphan draft. (This is why the repo had stale drafts for v0.6.1 and v0.6.8.) Always finish a release with:
 
 ```bash
-gh release view v{new_version} -R {owner}/{repo} 2>/dev/null
+gh run watch
+gh release view v{new_version} --json isDraft,isPrerelease,assets \
+  --jq '{isDraft, isPrerelease, assets:[.assets[].name]}'
 ```
 
-- If it **does not** exist: `gh release create v{new_version} --title "v{new_version}" --notes "{changelog}"`
-- If it **already exists** (CI created it): `gh release edit v{new_version} --notes "{changelog}"` to add the release notes, then delete any leftover draft duplicates.
+Require `isDraft=false`, `isPrerelease=false`, and assets including `latest.json` and a `.sig`. If it is still a draft with complete assets: `gh release edit v{new_version} --draft=false`.
+
+Before deleting any duplicate draft, reconcile it: compare its body and assets against the published release and migrate anything the published one is missing. (Release notes were lost this way for v0.6.1 and v0.6.8 - the published releases had blank bodies while the drafts held the changelog.) Migrate notes with `gh release edit v{new_version} --notes-file <file>`. Only then delete the duplicate draft:
+
+```bash
+gh api repos/{owner}/{repo}/releases --paginate \
+  --jq '.[] | select(.draft and .tag_name=="v{new_version}") | .id' \
+  | xargs -I{} gh api -X DELETE repos/{owner}/{repo}/releases/{}
+```
+
+Definition of done: exactly one published, non-draft release for the tag, with updater assets AND the release notes present.
 
 ## Changelog Template
 

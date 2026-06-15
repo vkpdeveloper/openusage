@@ -4,6 +4,26 @@ Version: 0.31 (2026-06-10)
 
 > OpenUsage is a public-facing Tauri desktop app for tracking AI provider usage across plugins.
 
+## Rollout: Tauri to Swift (read first)
+
+OpenUsage is being rewritten as a native Swift app. During the transition, two editions ship from this one repo and stay fully independent:
+- Identity: Tauri is `com.sunstory.openusage`; Swift is `com.robinebers.openusage` (macOS treats them as different apps).
+- Updates: Tauri reads `latest.json` from GitHub's "Latest" release; Swift uses a Sparkle appcast on the `gh-pages` branch. They never cross.
+- Pipelines: `main` + `.github/workflows/publish.yml` (Tauri); `swift` + `.github/workflows/release.yml` (Swift). Active development now happens on `swift`.
+
+### Guardrails (do not break)
+- Version lanes: Tauri stays on `0.6.x`; the Swift rewrite owns `0.7.x` and up. One `vX.Y.Z` tag namespace is shared, so never reuse a number across editions.
+- Keep every Swift release marked as a GitHub pre-release until the owner explicitly approves going public. A non-prerelease Swift release becomes GitHub "Latest" and silently breaks the Tauri auto-updater (it fetches `releases/latest/download/latest.json`).
+- Cut Tauri tags from a `main` commit (runs `publish.yml`); cut Swift tags from a `swift` commit (runs `release.yml`). A tag only triggers the workflow present in the commit it points at.
+- Never leave a release in Draft. After every release, verify it is published with its assets (use the release-tauri skill here; the swift branch has its own release-swift skill).
+- The Tauri edition stays in this repo forever (frozen, never deleted).
+
+### Phases
+1. Now - private Swift testing. Testers install the Swift DMG by hand, then enable Settings > Updates > Early Access to get `v0.7.0-beta.N` builds via Sparkle. Tauri users are untouched.
+2. Goodbye Tauri release. Cut the final Tauri build (retirement banner) with the release-tauri skill, e.g. `v0.6.28`. It becomes "Latest", auto-updates all Tauri users, and shows the "OpenUsage Has Moved" banner. Ship this BEFORE Phase 3.
+3. Flip Swift public. When the owner approves, cut a Swift stable release for everyone with the swift branch's release-swift skill. Only here may a Swift release drop the pre-release flag.
+4. Preserve Tauri. Make `swift` the default branch (the new `main`); rename today's Tauri `main` to `tauri-legacy` and freeze it. Tauri code and tags stay in the repo permanently.
+
 ## Documentation
 
 - Logic changes must update any docs in `docs/` that describe the affected behavior.

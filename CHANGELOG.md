@@ -719,6 +719,27 @@
 - [824e3da](https://github.com/robinebers/openusage/commit/824e3da) fix(plugin-engine): read whitelisted env vars from terminal zsh (#167) by @robinebers
 - [ffb8883](https://github.com/robinebers/openusage/commit/ffb8883) feat(analytics): implement Tauri runtime check for event tracking by @robinebers
 
+## v0.6.1
+
+### New Features
+- Add Z.ai (Zhipu AI) provider plugin — tracks GLM Coding session usage (%) and web search quotas ([#135](https://github.com/robinebers/openusage/pull/135)) by @pbuchman
+- Add start-on-login setting with OS autostart integration ([#161](https://github.com/robinebers/openusage/pull/161)) by @davidarny
+- Add optional plugin links and quick actions on provider cards ([#162](https://github.com/robinebers/openusage/pull/162)) by @davidarny
+
+### Bug Fixes
+- Factory plugin: support Droid encrypted file and macOS keychain auth fallback ([#159](https://github.com/robinebers/openusage/pull/159)) by @davidarny
+
+---
+
+### Changelog
+
+**Full Changelog**: [v0.6.0...v0.6.1](https://github.com/robinebers/openusage/compare/v0.6.0...v0.6.1)
+
+- [0ec23d7](https://github.com/robinebers/openusage/commit/0ec23d7) feat(zai): add Z.ai provider plugin (#135) by @pbuchman
+- [31e8b35](https://github.com/robinebers/openusage/commit/31e8b35) feat(settings): add start-on-login setting (#161) by @davidarny
+- [96aee9b](https://github.com/robinebers/openusage/commit/96aee9b) feat: add optional plugin links and quick actions (#162) by @davidarny
+- [3f7f914](https://github.com/robinebers/openusage/commit/3f7f914) fix(factory): support droid encrypted and keychain auth (#159) by @davidarny
+
 ## 0.6.0
 
 ### New Features
