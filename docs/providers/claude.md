@@ -61,6 +61,27 @@ All windows are enforced simultaneously — hitting any limit throttles the user
 
 ## Authentication
 
+### Saved Accounts
+
+OpenUsage can keep multiple Claude accounts:
+
+1. Log in to the account with Claude Code.
+2. Open the Claude page in OpenUsage.
+3. Enter a profile name and select **Save Current Login**.
+4. Repeat after logging Claude Code into another account.
+
+The profile name and ID are stored in OpenUsage app data. The OAuth credential payload is copied
+to macOS Keychain and is not stored in `settings.json` or the account index. Each saved account
+refreshes its own token copy, so changing the active Claude Code login does not replace an existing
+OpenUsage profile.
+
+When at least one saved Claude account exists, OpenUsage displays and refreshes those saved
+accounts. Remove every saved account to return to the normal current-Claude-Code-login behavior.
+
+Session and weekly limits remain attached to each saved account. Local cost, token, trend, and
+model history is shown once in a combined usage section below all Claude account cards because
+Claude Code stores that history as one shared local dataset.
+
 ### Token Location
 
 On macOS, OpenUsage reads Claude Code credentials from Keychain first. The default service name is:

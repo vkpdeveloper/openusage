@@ -7,6 +7,12 @@ This document describes the host APIs available to plugins via the `ctx` object 
 ```typescript
 type ProbeContext = {
   nowIso: string              // Current UTC time (ISO 8601)
+  account?: {
+    id: string
+    name: string
+    credentialJson: string
+    saveCredentialJson(value: string): void
+  }
   app: {
     version: string           // App version
     platform: string          // OS platform (e.g., "macos")
@@ -16,6 +22,14 @@ type ProbeContext = {
   host: HostApi
 }
 ```
+
+### `ctx.account`
+
+Present when OpenUsage runs a provider plugin for a saved account. The credential JSON comes from
+macOS Keychain. A plugin must call `saveCredentialJson` after rotating or refreshing tokens so the
+saved profile remains independent from the provider CLI's active login.
+
+Plugins must never include `credentialJson` or token values in their output or logs.
 
 ### `ctx.nowIso`
 

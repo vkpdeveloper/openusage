@@ -82,10 +82,15 @@ export function useProbeState({ onProbeResult }: UseProbeStateArgs) {
 
       const now = Date.now()
       updatePluginStates((prev) => {
-        const existing = prev[output.providerId]
+        const stateKey = output.instanceId || output.providerId
+        const existing = prev[stateKey]
+        const next = { ...prev }
+        if (stateKey !== output.providerId) {
+          delete next[output.providerId]
+        }
         return {
-          ...prev,
-          [output.providerId]: {
+          ...next,
+          [stateKey]: {
             data: errorMessage ? (existing?.data ?? null) : output,
             loading: false,
             error: errorMessage,

@@ -4,7 +4,7 @@ import type { PluginMeta } from "@/lib/plugin-types"
 import type { PluginSettings } from "@/lib/settings"
 import type { PluginState } from "@/hooks/app/types"
 
-export type DisplayPluginState = { meta: PluginMeta } & PluginState
+export type DisplayPluginState = { meta: PluginMeta; accounts: PluginState[] } & PluginState
 
 type UseAppPluginViewsArgs = {
   activeView: ActiveView
@@ -31,9 +31,17 @@ export function useAppPluginViews({
       .map((id) => {
         const meta = metaById.get(id)
         if (!meta) return null
-        const state =
-          pluginStates[id] ?? { data: null, loading: false, error: null, lastManualRefreshAt: null, lastUpdatedAt: null }
-        return { meta, ...state }
+        const accounts = Object.entries(pluginStates)
+          .filter(([key, state]) => key.startsWith(`${id}:`) && state.data?.accountId)
+          .map(([, state]) => state)
+        const state = pluginStates[id] ?? accounts[0] ?? {
+          data: null,
+          loading: false,
+          error: null,
+          lastManualRefreshAt: null,
+          lastUpdatedAt: null,
+        }
+        return { meta, accounts, ...state }
       })
       .filter((plugin): plugin is DisplayPluginState => Boolean(plugin))
   }, [pluginSettings, pluginStates, pluginsMeta])

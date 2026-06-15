@@ -130,6 +130,15 @@
     }
   }
 
+  function loadSavedAccount(ctx) {
+    if (!ctx.account || !ctx.account.credentialJson) return null
+    const auth = tryParseAuthJson(ctx, ctx.account.credentialJson)
+    if (!hasTokenLikeAuth(auth)) {
+      throw "Saved Codex account is invalid. Remove it and save the login again."
+    }
+    return { auth, authPath: null, source: "openusage-account" }
+  }
+
   function saveAuth(ctx, authState) {
     const auth = authState && authState.auth ? authState.auth : null
     if (!auth) return false
@@ -146,6 +155,15 @@
       }
       // Use compact JSON to avoid newline-induced keychain encoding issues.
       ctx.host.keychain.writeGenericPassword(KEYCHAIN_SERVICE, JSON.stringify(auth))
+      return true
+    }
+
+    if (authState.source === "openusage-account") {
+      if (!ctx.account || typeof ctx.account.saveCredentialJson !== "function") {
+        ctx.host.log.error("saved account credential writer is unavailable")
+        return false
+      }
+      ctx.account.saveCredentialJson(JSON.stringify(auth))
       return true
     }
 
@@ -208,6 +226,8 @@
       }
     } else if (authState.source === "keychain") {
       reloaded = loadAuthFromKeychain(ctx)
+    } else if (authState.source === "openusage-account") {
+      reloaded = loadSavedAccount(ctx)
     }
 
     if (!reloaded) return { status: "unchanged", authState }
@@ -926,6 +946,11 @@
   }
 
   function probe(ctx) {
+    const savedAccount = loadSavedAccount(ctx)
+    if (savedAccount) {
+      return probeWithAuthState(ctx, savedAccount)
+    }
+
     const fileAuth = loadFileAuthCandidates(ctx)
     let lastAuthFallbackError = null
     for (let i = 0; i < fileAuth.candidates.length; i++) {

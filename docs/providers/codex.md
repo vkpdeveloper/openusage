@@ -72,6 +72,31 @@ for example `1 available`.
 
 ## Authentication
 
+### Saved Accounts
+
+OpenUsage can keep multiple Codex accounts:
+
+1. Open the Codex page in OpenUsage.
+2. Enter a profile name and select **Add Codex Account**.
+3. Copy the private OAuth login link and open it in a browser.
+4. Repeat for each Codex account.
+
+If authentication is not completed within three minutes, OpenUsage stops the Codex login
+process, removes the incomplete profile directory, and returns to the add-account form.
+
+The profile name and ID are stored in OpenUsage app data. The OAuth credential payload is copied
+to macOS Keychain and is not stored in `settings.json` or the account index. OpenUsage runs the
+official Codex PKCE OAuth flow in an isolated `CODEX_HOME` under
+`~/.openusage/codex/<profile-id>/`. Each profile keeps its own `auth.json`, so adding an account
+does not replace or revoke the Codex CLI login in the user's normal home directory. OpenUsage
+suppresses Codex's automatic browser launch and only displays a copyable login link.
+
+When at least one saved Codex account exists, OpenUsage displays and refreshes those saved
+accounts. Remove every saved account to return to the normal current-Codex-login behavior.
+
+Account limits remain attached to each saved account. Local cost, token, trend, and model history
+is shown once in a combined usage section below all Codex account cards.
+
 ### Credential Storage Locations
 
 Codex CLI supports multiple credential storage modes:

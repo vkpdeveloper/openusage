@@ -46,6 +46,53 @@ describe("codex plugin", () => {
     expect(result.lines.find((line) => line.label === "Session")).toBeTruthy()
   }
 
+  it("uses and refreshes an OpenUsage saved account independently", async () => {
+    const ctx = makeCtx()
+    ctx.account = {
+      id: "codex-profile",
+      name: "Personal",
+      credentialJson: JSON.stringify({
+        tokens: {
+          access_token: makeJwt({ exp: 1 }),
+          refresh_token: "saved-refresh-token",
+          account_id: "saved-account-id",
+        },
+        last_refresh: "2000-01-01T00:00:00.000Z",
+      }),
+      saveCredentialJson: vi.fn(),
+    }
+    ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("/oauth/token")) {
+        return {
+          status: 200,
+          headers: {},
+          bodyText: JSON.stringify({
+            access_token: "saved-new-token",
+            refresh_token: "saved-new-refresh",
+          }),
+        }
+      }
+      expect(opts.headers.Authorization).toBe("Bearer saved-new-token")
+      expect(opts.headers["ChatGPT-Account-Id"]).toBe("saved-account-id")
+      return {
+        status: 200,
+        headers: { "x-codex-primary-used-percent": "18" },
+        bodyText: JSON.stringify({}),
+      }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(result.lines.find((line) => line.label === "Session")).toBeTruthy()
+    expect(ctx.account.saveCredentialJson).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(ctx.account.saveCredentialJson.mock.calls[0][0]).tokens).toMatchObject({
+      access_token: "saved-new-token",
+      refresh_token: "saved-new-refresh",
+    })
+    expect(ctx.host.keychain.readGenericPassword).not.toHaveBeenCalled()
+  })
+
   it("throws when auth missing", async () => {
     const ctx = makeCtx()
     const plugin = await loadPlugin()

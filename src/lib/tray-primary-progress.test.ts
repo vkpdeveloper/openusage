@@ -3,6 +3,64 @@ import { describe, expect, it } from "vitest"
 import { getTrayPrimaryBars } from "@/lib/tray-primary-progress"
 
 describe("getTrayPrimaryBars", () => {
+  it("uses the first saved account for a provider", () => {
+    const bars = getTrayPrimaryBars({
+      displayMode: "used",
+      pluginsMeta: [{
+        id: "codex",
+        name: "Codex",
+        iconUrl: "",
+        primaryCandidates: ["Session"],
+        lines: [],
+      }],
+      pluginSettings: { order: ["codex"], disabled: [] },
+      pluginStates: {
+        "codex:second": {
+          data: {
+            providerId: "codex",
+            instanceId: "codex:second",
+            accountId: "second",
+            accountName: "Work",
+            accountOrder: 1,
+            displayName: "Codex",
+            iconUrl: "",
+            lines: [{
+              type: "progress",
+              label: "Session",
+              used: 80,
+              limit: 100,
+              format: { kind: "percent" },
+            }],
+          },
+          loading: false,
+          error: null,
+        },
+        "codex:first": {
+          data: {
+            providerId: "codex",
+            instanceId: "codex:first",
+            accountId: "first",
+            accountName: "Personal",
+            accountOrder: 0,
+            displayName: "Codex",
+            iconUrl: "",
+            lines: [{
+              type: "progress",
+              label: "Session",
+              used: 30,
+              limit: 100,
+              format: { kind: "percent" },
+            }],
+          },
+          loading: false,
+          error: null,
+        },
+      },
+    })
+
+    expect(bars).toEqual([{ id: "codex", fraction: 0.3, label: "Session" }])
+  })
+
   it("returns empty when settings missing", () => {
     const bars = getTrayPrimaryBars({
       pluginsMeta: [],

@@ -1,3 +1,5 @@
+mod accounts;
+mod codex_oauth;
 #[cfg(target_os = "macos")]
 mod app_nap;
 mod config;
@@ -222,6 +224,68 @@ fn open_devtools(#[allow(unused)] app_handle: tauri::AppHandle) {
 }
 
 #[tauri::command]
+fn list_provider_accounts(
+    state: tauri::State<'_, Mutex<AppState>>,
+) -> Result<Vec<accounts::ProviderAccount>, String> {
+    let locked = state.lock().map_err(|error| error.to_string())?;
+    accounts::list(&locked.app_data_dir)
+}
+
+#[tauri::command]
+fn get_current_provider_login_status(
+    state: tauri::State<'_, Mutex<AppState>>,
+    provider_id: String,
+) -> Result<accounts::CurrentLoginStatus, String> {
+    let locked = state.lock().map_err(|error| error.to_string())?;
+    accounts::current_login_status(&locked.app_data_dir, &provider_id)
+}
+
+#[tauri::command]
+fn import_current_provider_account(
+    state: tauri::State<'_, Mutex<AppState>>,
+    provider_id: String,
+    name: String,
+) -> Result<accounts::ProviderAccount, String> {
+    let locked = state.lock().map_err(|error| error.to_string())?;
+    accounts::import_current(&locked.app_data_dir, &provider_id, &name)
+}
+
+#[tauri::command]
+fn rename_provider_account(
+    state: tauri::State<'_, Mutex<AppState>>,
+    account_id: String,
+    name: String,
+) -> Result<(), String> {
+    let locked = state.lock().map_err(|error| error.to_string())?;
+    accounts::rename(&locked.app_data_dir, &account_id, &name)
+}
+
+#[tauri::command]
+fn remove_provider_account(
+    state: tauri::State<'_, Mutex<AppState>>,
+    account_id: String,
+) -> Result<(), String> {
+    let locked = state.lock().map_err(|error| error.to_string())?;
+    accounts::remove(&locked.app_data_dir, &account_id)
+}
+
+#[tauri::command]
+fn start_codex_oauth(
+    state: tauri::State<'_, Mutex<AppState>>,
+    name: String,
+) -> Result<codex_oauth::OAuthSession, String> {
+    let locked = state.lock().map_err(|error| error.to_string())?;
+    codex_oauth::start(&locked.app_data_dir, &name)
+}
+
+#[tauri::command]
+fn get_codex_oauth_status(
+    session_id: String,
+) -> Result<codex_oauth::OAuthSession, String> {
+    codex_oauth::status(&session_id)
+}
+
+#[tauri::command]
 async fn start_probe_batch(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, Mutex<AppState>>,
@@ -291,7 +355,23 @@ async fn start_probe_batch(
         });
     }
 
-    let selected_count = selected_plugins.len();
+    let probe_tasks: Vec<_> = selected_plugins
+        .into_iter()
+        .flat_map(|plugin| {
+            if plugin.manifest.id == "claude" || plugin.manifest.id == "codex" {
+                let saved_accounts = accounts::load_credentials(&app_data_dir, &plugin.manifest.id);
+                if !saved_accounts.is_empty() {
+                    return saved_accounts
+                        .into_iter()
+                        .map(|account| (plugin.clone(), Some(account)))
+                        .collect::<Vec<_>>();
+                }
+            }
+            vec![(plugin, None)]
+        })
+        .collect();
+
+    let selected_count = probe_tasks.len();
     let worker_count = probe_worker_count(selected_count);
     if worker_count < selected_count {
         log::info!(
@@ -303,9 +383,7 @@ async fn start_probe_batch(
     }
 
     let remaining = Arc::new(AtomicUsize::new(selected_count));
-    let probe_queue = Arc::new(Mutex::new(
-        selected_plugins.into_iter().collect::<VecDeque<_>>(),
-    ));
+    let probe_queue = Arc::new(Mutex::new(probe_tasks.into_iter().collect::<VecDeque<_>>()));
 
     for _ in 0..worker_count {
         let handle = app_handle.clone();
@@ -326,13 +404,18 @@ async fn start_probe_batch(
                     queue.pop_front()
                 };
 
-                let Some(plugin) = plugin else {
+                let Some((plugin, account)) = plugin else {
                     break;
                 };
 
                 let plugin_id = plugin.manifest.id.clone();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    plugin_engine::runtime::run_probe(&plugin, &data_dir, &version)
+                    plugin_engine::runtime::run_probe_for_account(
+                        &plugin,
+                        &data_dir,
+                        &version,
+                        account.as_ref(),
+                    )
                 }));
 
                 match result {
@@ -537,6 +620,13 @@ pub fn run() {
             hide_panel,
             open_devtools,
             start_probe_batch,
+            list_provider_accounts,
+            get_current_provider_login_status,
+            import_current_provider_account,
+            rename_provider_account,
+            remove_provider_account,
+            start_codex_oauth,
+            get_codex_oauth_status,
             list_plugins,
             get_log_path,
             update_global_shortcut

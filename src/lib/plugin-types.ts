@@ -37,6 +37,10 @@ export type PluginLink = {
 
 export type PluginOutput = {
   providerId: string
+  instanceId: string
+  accountId?: string
+  accountName?: string
+  accountOrder?: number
   displayName: string
   plan?: string
   lines: MetricLine[]
@@ -63,4 +67,11 @@ export type PluginDisplayState = {
   error: string | null
   lastManualRefreshAt: number | null
   lastUpdatedAt: number | null
+  accounts?: Array<{
+    data: PluginOutput | null
+    loading: boolean
+    error: string | null
+    lastManualRefreshAt: number | null
+    lastUpdatedAt: number | null
+  }>
 }

@@ -63,6 +63,10 @@ pub enum MetricLine {
 #[serde(rename_all = "camelCase")]
 pub struct PluginOutput {
     pub provider_id: String,
+    pub instance_id: String,
+    pub account_id: Option<String>,
+    pub account_name: Option<String>,
+    pub account_order: Option<usize>,
     pub display_name: String,
     pub plan: Option<String>,
     pub lines: Vec<MetricLine>,
@@ -70,11 +74,21 @@ pub struct PluginOutput {
 }
 
 pub fn run_probe(plugin: &LoadedPlugin, app_data_dir: &PathBuf, app_version: &str) -> PluginOutput {
+    run_probe_for_account(plugin, app_data_dir, app_version, None)
+}
+
+pub fn run_probe_for_account(
+    plugin: &LoadedPlugin,
+    app_data_dir: &PathBuf,
+    app_version: &str,
+    account: Option<&crate::accounts::AccountCredential>,
+) -> PluginOutput {
     run_probe_with_timeout(
         plugin,
         app_data_dir,
         app_version,
         Duration::from_secs(PROBE_TIMEOUT_SECS),
+        account,
     )
 }
 
@@ -83,8 +97,9 @@ fn run_probe_with_timeout(
     app_data_dir: &PathBuf,
     app_version: &str,
     timeout: Duration,
+    account: Option<&crate::accounts::AccountCredential>,
 ) -> PluginOutput {
-    let fallback = error_output(plugin, "runtime error".to_string());
+    let fallback = error_output(plugin, account, "runtime error".to_string());
     let timeout_message = probe_timeout_message(timeout);
     let deadline_at = Instant::now()
         .checked_add(timeout)
@@ -115,55 +130,58 @@ fn run_probe_with_timeout(
             &app_data,
             app_version,
             deadline,
+            account,
         )
         .is_err()
         {
             if deadline.has_elapsed() {
-                return error_output(plugin, timeout_message.clone());
+                return error_output(plugin, account, timeout_message.clone());
             }
-            return error_output(plugin, "host api injection failed".to_string());
+            return error_output(plugin, account, "host api injection failed".to_string());
         }
         if host_api::patch_http_wrapper(&ctx).is_err() {
             if deadline.has_elapsed() {
-                return error_output(plugin, timeout_message.clone());
+                return error_output(plugin, account, timeout_message.clone());
             }
-            return error_output(plugin, "http wrapper patch failed".to_string());
+            return error_output(plugin, account, "http wrapper patch failed".to_string());
         }
         if host_api::patch_ls_wrapper(&ctx).is_err() {
             if deadline.has_elapsed() {
-                return error_output(plugin, timeout_message.clone());
+                return error_output(plugin, account, timeout_message.clone());
             }
-            return error_output(plugin, "ls wrapper patch failed".to_string());
+            return error_output(plugin, account, "ls wrapper patch failed".to_string());
         }
         if host_api::patch_ccusage_wrapper(&ctx).is_err() {
             if deadline.has_elapsed() {
-                return error_output(plugin, timeout_message.clone());
+                return error_output(plugin, account, timeout_message.clone());
             }
-            return error_output(plugin, "ccusage wrapper patch failed".to_string());
+            return error_output(plugin, account, "ccusage wrapper patch failed".to_string());
         }
         if host_api::inject_utils(&ctx).is_err() {
             if deadline.has_elapsed() {
-                return error_output(plugin, timeout_message.clone());
+                return error_output(plugin, account, timeout_message.clone());
             }
-            return error_output(plugin, "utils injection failed".to_string());
+            return error_output(plugin, account, "utils injection failed".to_string());
         }
 
         if ctx.eval::<(), _>(entry_script.as_bytes()).is_err() {
             if deadline.has_elapsed() {
-                return error_output(plugin, timeout_message.clone());
+                return error_output(plugin, account, timeout_message.clone());
             }
-            return error_output(plugin, "script eval failed".to_string());
+            return error_output(plugin, account, "script eval failed".to_string());
         }
 
         let globals = ctx.globals();
         let plugin_obj: Object = match globals.get("__openusage_plugin") {
             Ok(obj) => obj,
-            Err(_) => return error_output(plugin, "missing __openusage_plugin".to_string()),
+            Err(_) => {
+                return error_output(plugin, account, "missing __openusage_plugin".to_string());
+            }
         };
 
         let probe_fn: rquickjs::Function = match plugin_obj.get("probe") {
             Ok(f) => f,
-            Err(_) => return error_output(plugin, "missing probe()".to_string()),
+            Err(_) => return error_output(plugin, account, "missing probe()".to_string()),
         };
 
         let probe_ctx: Value = globals
@@ -174,41 +192,55 @@ fn run_probe_with_timeout(
             Ok(r) => r,
             Err(_) => {
                 if deadline.has_elapsed() {
-                    return error_output(plugin, timeout_message.clone());
+                    return error_output(plugin, account, timeout_message.clone());
                 }
-                return error_output(plugin, extract_error_string(&ctx));
+                return error_output(plugin, account, extract_error_string(&ctx));
             }
         };
         if deadline.has_elapsed() {
-            return error_output(plugin, timeout_message.clone());
+            return error_output(plugin, account, timeout_message.clone());
         }
         let result: Object = if result_value.is_promise() {
             let promise: Promise = match result_value.into_promise() {
                 Some(promise) => promise,
                 None => {
-                    return error_output(plugin, "probe() returned invalid promise".to_string());
+                    return error_output(
+                        plugin,
+                        account,
+                        "probe() returned invalid promise".to_string(),
+                    );
                 }
             };
             match promise.finish::<Object>() {
                 Ok(obj) => obj,
                 Err(Error::WouldBlock) => {
-                    return error_output(plugin, "probe() returned unresolved promise".to_string());
+                    return error_output(
+                        plugin,
+                        account,
+                        "probe() returned unresolved promise".to_string(),
+                    );
                 }
                 Err(_) => {
                     if deadline.has_elapsed() {
-                        return error_output(plugin, timeout_message.clone());
+                        return error_output(plugin, account, timeout_message.clone());
                     }
-                    return error_output(plugin, extract_error_string(&ctx));
+                    return error_output(plugin, account, extract_error_string(&ctx));
                 }
             }
         } else {
             match result_value.into_object() {
                 Some(obj) => obj,
-                None => return error_output(plugin, "probe() returned non-object".to_string()),
+                None => {
+                    return error_output(
+                        plugin,
+                        account,
+                        "probe() returned non-object".to_string(),
+                    );
+                }
             }
         };
         if deadline.has_elapsed() {
-            return error_output(plugin, timeout_message.clone());
+            return error_output(plugin, account, timeout_message.clone());
         }
 
         let plan: Option<String> = result
@@ -224,6 +256,12 @@ fn run_probe_with_timeout(
 
         PluginOutput {
             provider_id: plugin_id,
+            instance_id: account
+                .map(|value| format!("{}:{}", value.account.provider_id, value.account.id))
+                .unwrap_or_else(|| plugin.manifest.id.clone()),
+            account_id: account.map(|value| value.account.id.clone()),
+            account_name: account.map(|value| value.account.name.clone()),
+            account_order: account.map(|value| value.order),
             display_name,
             plan,
             lines,
@@ -637,7 +675,10 @@ fn parse_bar_chart_line<'js>(
     }
 
     if points.is_empty() {
-        errors.push(format!("barChart line at index {} has no valid points", idx));
+        errors.push(format!(
+            "barChart line at index {} has no valid points",
+            idx
+        ));
         return (None, errors);
     }
 
@@ -672,9 +713,19 @@ fn parse_bar_chart_line<'js>(
     )
 }
 
-fn error_output(plugin: &LoadedPlugin, message: String) -> PluginOutput {
+fn error_output(
+    plugin: &LoadedPlugin,
+    account: Option<&crate::accounts::AccountCredential>,
+    message: String,
+) -> PluginOutput {
     PluginOutput {
         provider_id: plugin.manifest.id.clone(),
+        instance_id: account
+            .map(|value| format!("{}:{}", value.account.provider_id, value.account.id))
+            .unwrap_or_else(|| plugin.manifest.id.clone()),
+        account_id: account.map(|value| value.account.id.clone()),
+        account_name: account.map(|value| value.account.name.clone()),
+        account_order: account.map(|value| value.order),
         display_name: plugin.manifest.name.clone(),
         plan: None,
         lines: vec![error_line(message)],
@@ -805,6 +856,7 @@ mod tests {
             &temp_app_dir("timeout"),
             "0.0.0",
             Duration::from_millis(5),
+            None,
         );
 
         assert_eq!(error_text(output), "probe timed out after 5ms");

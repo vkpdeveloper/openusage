@@ -65,7 +65,14 @@ export function getTrayPrimaryBars(args: {
     // provider is intentionally skipped.
     if (!meta.primaryCandidates || meta.primaryCandidates.length === 0) continue
 
-    const state = pluginStates[id]
+    const state =
+      pluginStates[id] ??
+      Object.entries(pluginStates)
+        .filter(([, candidate]) => candidate?.data?.providerId === id && candidate.data.accountId)
+        .sort(([, left], [, right]) =>
+          (left?.data?.accountOrder ?? Number.MAX_SAFE_INTEGER) -
+          (right?.data?.accountOrder ?? Number.MAX_SAFE_INTEGER)
+        )[0]?.[1]
     const data = state?.data ?? null
 
     let fraction: number | undefined
@@ -108,4 +115,3 @@ export function getTrayPrimaryBars(args: {
 
   return out
 }
-

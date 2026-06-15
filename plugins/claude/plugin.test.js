@@ -23,6 +23,53 @@ beforeEach(() => {
 const loadPlugin = async () => plugin
 
 describe("claude plugin", () => {
+  it("uses and refreshes an OpenUsage saved account independently", async () => {
+    const ctx = makeCtx()
+    ctx.account = {
+      id: "claude-profile",
+      name: "Work",
+      credentialJson: JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "saved-old-token",
+          refreshToken: "saved-refresh-token",
+          expiresAt: 1,
+        },
+      }),
+      saveCredentialJson: vi.fn(),
+    }
+    ctx.host.http.request.mockImplementation((opts) => {
+      if (String(opts.url).includes("/v1/oauth/token")) {
+        return {
+          status: 200,
+          bodyText: JSON.stringify({
+            access_token: "saved-new-token",
+            refresh_token: "saved-new-refresh",
+            expires_in: 3600,
+          }),
+        }
+      }
+      expect(opts.headers.Authorization).toBe("Bearer saved-new-token")
+      return {
+        status: 200,
+        headers: {},
+        bodyText: JSON.stringify({
+          five_hour: { utilization: 12, resets_at: "2099-01-01T00:00:00Z" },
+        }),
+      }
+    })
+
+    const plugin = await loadPlugin()
+    const result = plugin.probe(ctx)
+
+    expect(result.lines.find((line) => line.label === "Session")).toBeTruthy()
+    expect(ctx.account.saveCredentialJson).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(ctx.account.saveCredentialJson.mock.calls[0][0]).claudeAiOauth).toMatchObject({
+      accessToken: "saved-new-token",
+      refreshToken: "saved-new-refresh",
+    })
+    expect(ctx.host.keychain.readGenericPassword).not.toHaveBeenCalled()
+  })
+
   it("throws when no credentials", async () => {
     const ctx = makeCtx()
     const plugin = await loadPlugin()

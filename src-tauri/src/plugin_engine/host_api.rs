@@ -4,7 +4,7 @@ use aes_gcm::{
     aes::Aes256,
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
-use rquickjs::{function::Rest, Ctx, Exception, Function, Object};
+use rquickjs::{Ctx, Exception, Function, Object, function::Rest};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -317,6 +317,8 @@ fn redact_url(url: &str) -> String {
         "authorization",
         "bearer",
         "credential",
+        "credential_json",
+        "credentialJson",
         "user",
         "user_id",
         "userid",
@@ -378,9 +380,7 @@ fn redact_body(body: &str) -> String {
         })
         .to_string();
 
-    if let Ok(devin_session_re) =
-        regex_lite::Regex::new(r#"devin-session-token\$[^\s"',}\]]+"#)
-    {
+    if let Ok(devin_session_re) = regex_lite::Regex::new(r#"devin-session-token\$[^\s"',}\]]+"#) {
         result = devin_session_re
             .replace_all(&result, |caps: &regex_lite::Captures| {
                 redact_value(&caps[0])
@@ -401,6 +401,8 @@ fn redact_body(body: &str) -> String {
         "authorization",
         "bearer",
         "credential",
+        "credential_json",
+        "credentialJson",
         "session_token",
         "sessionToken",
         "auth_token",
@@ -429,7 +431,7 @@ fn redact_body(body: &str) -> String {
     ];
     for key in sensitive_keys {
         // Match "key": "value" or "key":"value"
-        let pattern = format!(r#""{}":\s*"([^"]+)""#, key);
+        let pattern = format!(r#""{}":\s*"((?:\\.|[^"\\])*)""#, key);
         if let Ok(re) = regex_lite::Regex::new(&pattern) {
             result = re
                 .replace_all(&result, |caps: &regex_lite::Captures| {
@@ -467,9 +469,7 @@ pub(crate) fn redact_log_message(msg: &str) -> String {
             })
             .to_string();
     }
-    if let Ok(devin_session_re) =
-        regex_lite::Regex::new(r#"devin-session-token\$[^\s"',}\]]+"#)
-    {
+    if let Ok(devin_session_re) = regex_lite::Regex::new(r#"devin-session-token\$[^\s"',}\]]+"#) {
         result = devin_session_re
             .replace_all(&result, |caps: &regex_lite::Captures| {
                 redact_value(&caps[0])
@@ -595,6 +595,7 @@ pub(crate) fn inject_host_api<'js>(
         app_data_dir,
         app_version,
         ProbeDeadline::none(),
+        None,
     )
 }
 
@@ -604,6 +605,7 @@ pub(crate) fn inject_host_api_with_deadline<'js>(
     app_data_dir: &PathBuf,
     app_version: &str,
     deadline: ProbeDeadline,
+    account: Option<&crate::accounts::AccountCredential>,
 ) -> rquickjs::Result<()> {
     let globals = ctx.globals();
     let probe_ctx = Object::new(ctx.clone())?;
@@ -640,6 +642,24 @@ pub(crate) fn inject_host_api_with_deadline<'js>(
     inject_ccusage(ctx, &host, plugin_id, deadline)?;
 
     probe_ctx.set("host", host)?;
+    if let Some(account) = account {
+        let account_obj = Object::new(ctx.clone())?;
+        account_obj.set("id", account.account.id.clone())?;
+        account_obj.set("name", account.account.name.clone())?;
+        account_obj.set("credentialJson", account.credential_json.clone())?;
+        let account_id = account.account.id.clone();
+        account_obj.set(
+            "saveCredentialJson",
+            Function::new(
+                ctx.clone(),
+                move |ctx_inner: Ctx<'_>, credential_json: String| -> rquickjs::Result<()> {
+                    crate::accounts::update_credential(&account_id, &credential_json)
+                        .map_err(|error| Exception::throw_message(&ctx_inner, &error))
+                },
+            )?,
+        )?;
+        probe_ctx.set("account", account_obj)?;
+    }
     globals.set("__openusage_ctx", probe_ctx)?;
 
     Ok(())
@@ -3535,6 +3555,14 @@ mod tests {
             "password should be redacted, got: {}",
             redacted
         );
+    }
+
+    #[test]
+    fn redact_body_redacts_saved_account_credentials() {
+        let body = r#"{"credentialJson":"{\"accessToken\":\"saved-secret-token\"}","credential_json":"saved-secret-token-two"}"#;
+        let redacted = redact_body(body);
+        assert!(!redacted.contains("saved-secret-token"));
+        assert!(!redacted.contains("saved-secret-token-two"));
     }
 
     #[test]

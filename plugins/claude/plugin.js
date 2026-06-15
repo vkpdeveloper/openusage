@@ -325,6 +325,19 @@
   }
 
   function loadCredentials(ctx) {
+    if (ctx.account && ctx.account.credentialJson) {
+      const parsed = tryParseCredentialJSON(ctx, ctx.account.credentialJson)
+      const oauth = parsed && parsed.claudeAiOauth
+      if (!oauth || !oauth.accessToken) {
+        throw "Saved Claude account is invalid. Remove it and save the login again."
+      }
+      return {
+        oauth,
+        source: "openusage-account",
+        fullData: parsed,
+      }
+    }
+
     const envAccessToken = readEnvText(ctx, "CLAUDE_CODE_OAUTH_TOKEN")
     const stored = loadStoredCredentials(ctx, !!envAccessToken)
     if (!envAccessToken) {
@@ -357,6 +370,14 @@
     // MUST use minified JSON - macOS `security -w` hex-encodes values with newlines,
     // which Claude Code can't read back, causing it to invalidate the session.
     const text = JSON.stringify(fullData)
+    if (source === "openusage-account") {
+      try {
+        ctx.account.saveCredentialJson(text)
+      } catch (e) {
+        ctx.host.log.error("Failed to update saved Claude account: " + String(e))
+      }
+      return
+    }
     if (source === "file") {
       try {
         ctx.host.fs.writeText(getClaudeCredentialsPath(ctx), text)

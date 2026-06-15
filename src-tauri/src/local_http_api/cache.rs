@@ -342,6 +342,10 @@ mod tests {
     fn make_output(id: &str, name: &str) -> PluginOutput {
         PluginOutput {
             provider_id: id.to_string(),
+            instance_id: id.to_string(),
+            account_id: None,
+            account_name: None,
+            account_order: None,
             display_name: name.to_string(),
             plan: Some("Pro".to_string()),
             lines: vec![MetricLine::Text {
