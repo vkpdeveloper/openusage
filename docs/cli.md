@@ -12,6 +12,10 @@ Make sure `~/.local/bin` is in your shell `PATH` if the command is not found.
 
 ## Commands
 
+### `openusage`
+
+Alias for `openusage usage`.
+
 ### `openusage usage`
 
 Refreshes all enabled providers, saves successful results to the same cache used by the desktop app, then prints the current cached usage as JSON.

@@ -26,14 +26,20 @@ enum CliCommand {
 
 pub fn handled_from_env() -> bool {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.is_empty() {
+    if args.is_empty() && !is_user_cli_entrypoint() {
         return false;
     }
     if args.first().is_some_and(|arg| arg.starts_with("-psn_")) {
         return false;
     }
 
-    match parse_args(&args) {
+    let command = if args.is_empty() {
+        Ok(CliCommand::Usage { refresh: true })
+    } else {
+        parse_args(&args)
+    };
+
+    match command {
         Ok(CliCommand::Help) => {
             print!("{}", CLI_HELP);
             true
@@ -54,6 +60,13 @@ pub fn handled_from_env() -> bool {
             std::process::exit(2);
         }
     }
+}
+
+fn is_user_cli_entrypoint() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    cli_path().is_ok_and(|path| paths_resolve_to_same_file(&path, &exe))
 }
 
 fn parse_args(args: &[String]) -> Result<CliCommand, String> {
@@ -178,6 +191,12 @@ fn resolve_app_data_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "failed to resolve app data dir".to_string())
 }
 
+fn cli_path() -> Result<PathBuf, String> {
+    dirs::home_dir()
+        .map(|home| home.join(".local/bin/openusage"))
+        .ok_or_else(|| "home directory is unavailable".to_string())
+}
+
 fn resolve_resource_dir() -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
     let cwd_candidates = [
@@ -216,6 +235,10 @@ fn has_bundled_plugins(path: &Path) -> bool {
 
 fn normalize_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn paths_resolve_to_same_file(left: &Path, right: &Path) -> bool {
+    normalize_path(left) == normalize_path(right)
 }
 
 #[cfg(test)]
@@ -258,5 +281,32 @@ mod tests {
     #[test]
     fn parse_unknown_command_fails() {
         assert!(parse_args(&args(&["nope"])).is_err());
+    }
+
+    #[test]
+    fn symlinked_cli_entrypoint_matches_target_executable() {
+        let root = std::env::temp_dir().join(format!(
+            "openusage-cli-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bin_dir = root.join(".local/bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let target = root.join("OpenUsage.app/Contents/MacOS/openusage");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "").unwrap();
+        let cli = bin_dir.join("openusage");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &cli).unwrap();
+
+        #[cfg(windows)]
+        std::fs::copy(&target, &cli).unwrap();
+
+        assert!(paths_resolve_to_same_file(&cli, &target));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
