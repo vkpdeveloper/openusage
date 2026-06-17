@@ -1,7 +1,9 @@
 mod accounts;
-mod codex_oauth;
 #[cfg(target_os = "macos")]
 mod app_nap;
+mod cli;
+mod cli_install;
+mod codex_oauth;
 mod config;
 mod local_http_api;
 mod log_path;
@@ -144,6 +146,10 @@ pub struct AppState {
     pub plugins: Vec<plugin_engine::manifest::LoadedPlugin>,
     pub app_data_dir: PathBuf,
     pub app_version: String,
+}
+
+pub fn handle_cli_from_env() -> bool {
+    cli::handled_from_env()
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -678,6 +684,7 @@ pub fn run() {
 
             local_http_api::init(&app_data_dir, known_plugin_ids);
             local_http_api::start_server();
+            cli_install::install_for_current_user();
 
             tray::create(app.handle())?;
 

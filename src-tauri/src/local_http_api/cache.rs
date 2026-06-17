@@ -290,7 +290,22 @@ fn read_plugin_settings(app_data_dir: &Path) -> (Vec<String>, HashSet<String>, b
 /// Build the ordered list of enabled cached snapshots for GET /v1/usage.
 pub(super) fn enabled_snapshots_ordered(state: &CacheState) -> Vec<CachedPluginSnapshot> {
     let (settings_order, disabled, has_settings) = read_plugin_settings(&state.app_data_dir);
+    enabled_snapshots_ordered_with_settings(
+        &state.snapshots,
+        &state.known_plugin_ids,
+        settings_order,
+        disabled,
+        has_settings,
+    )
+}
 
+fn enabled_snapshots_ordered_with_settings(
+    snapshots: &HashMap<String, CachedPluginSnapshot>,
+    known_plugin_ids: &[String],
+    settings_order: Vec<String>,
+    disabled: HashSet<String>,
+    has_settings: bool,
+) -> Vec<CachedPluginSnapshot> {
     let default_enabled: HashSet<&str> = DEFAULT_ENABLED_PLUGINS.iter().copied().collect();
 
     let is_enabled = |id: &str| -> bool {
@@ -309,7 +324,7 @@ pub(super) fn enabled_snapshots_ordered(state: &CacheState) -> Vec<CachedPluginS
             ordered.push(id.clone());
         }
     }
-    for id in &state.known_plugin_ids {
+    for id in known_plugin_ids {
         if seen.insert(id.clone()) {
             ordered.push(id.clone());
         }
@@ -318,7 +333,41 @@ pub(super) fn enabled_snapshots_ordered(state: &CacheState) -> Vec<CachedPluginS
     ordered
         .into_iter()
         .filter(|id| is_enabled(id))
-        .filter_map(|id| state.snapshots.get(&id).cloned())
+        .filter_map(|id| snapshots.get(&id).cloned())
+        .collect()
+}
+
+pub fn enabled_cached_snapshots() -> Vec<CachedPluginSnapshot> {
+    let state = cache_state().lock().expect("cache state poisoned");
+    enabled_snapshots_ordered(&state)
+}
+
+pub fn enabled_plugin_ids_ordered(app_data_dir: &Path, known_plugin_ids: &[String]) -> Vec<String> {
+    let (settings_order, disabled, has_settings) = read_plugin_settings(app_data_dir);
+    let default_enabled: HashSet<&str> = DEFAULT_ENABLED_PLUGINS.iter().copied().collect();
+
+    let mut ordered: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+    for id in settings_order {
+        if seen.insert(id.clone()) {
+            ordered.push(id);
+        }
+    }
+    for id in known_plugin_ids {
+        if seen.insert(id.clone()) {
+            ordered.push(id.clone());
+        }
+    }
+
+    ordered
+        .into_iter()
+        .filter(|id| {
+            if has_settings {
+                !disabled.contains(id)
+            } else {
+                default_enabled.contains(id.as_str())
+            }
+        })
         .collect()
 }
 
