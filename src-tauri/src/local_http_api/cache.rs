@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+use time::OffsetDateTime;
 
 const CACHE_FILE_NAME: &str = "usage-api-cache.json";
 const SETTINGS_FILE_NAME: &str = "settings.json";
@@ -23,6 +24,11 @@ const CACHE_WRITE_RETRY_MAX_DELAY: Duration = Duration::from_secs(30);
 #[serde(rename_all = "camelCase")]
 pub struct CachedPluginSnapshot {
     pub provider_id: String,
+    #[serde(default)]
+    pub instance_id: String,
+    pub account_id: Option<String>,
+    pub account_name: Option<String>,
+    pub account_order: Option<usize>,
     pub display_name: String,
     pub plan: Option<String>,
     pub lines: Vec<MetricLine>,
@@ -86,7 +92,7 @@ pub fn load_cache(app_data_dir: &Path) -> HashMap<String, CachedPluginSnapshot> 
         Err(_) => return HashMap::new(),
     };
     match serde_json::from_str::<UsageApiCacheFile>(&data) {
-        Ok(file) if file.version == 1 => file.snapshots,
+        Ok(file) if file.version == 1 => migrate_loaded_snapshots(file.snapshots),
         Ok(_) => {
             log::warn!("usage-api-cache.json has unsupported version, starting empty");
             HashMap::new()
@@ -99,6 +105,20 @@ pub fn load_cache(app_data_dir: &Path) -> HashMap<String, CachedPluginSnapshot> 
             HashMap::new()
         }
     }
+}
+
+fn migrate_loaded_snapshots(
+    snapshots: HashMap<String, CachedPluginSnapshot>,
+) -> HashMap<String, CachedPluginSnapshot> {
+    snapshots
+        .into_iter()
+        .map(|(key, mut snapshot)| {
+            if snapshot.instance_id.is_empty() {
+                snapshot.instance_id = key;
+            }
+            (snapshot.instance_id.clone(), snapshot)
+        })
+        .collect()
 }
 
 fn save_cache(
@@ -233,6 +253,10 @@ pub fn cache_successful_output(output: &PluginOutput) {
 
     let snapshot = CachedPluginSnapshot {
         provider_id: output.provider_id.clone(),
+        instance_id: output.instance_id.clone(),
+        account_id: output.account_id.clone(),
+        account_name: output.account_name.clone(),
+        account_order: output.account_order,
         display_name: output.display_name.clone(),
         plan: output.plan.clone(),
         lines: output.lines.clone(),
@@ -240,7 +264,7 @@ pub fn cache_successful_output(output: &PluginOutput) {
     };
 
     let mut state = cache_state().lock().expect("cache state poisoned");
-    state.snapshots.insert(output.provider_id.clone(), snapshot);
+    state.snapshots.insert(output.instance_id.clone(), snapshot);
     state.dirty_generation = state.dirty_generation.wrapping_add(1);
     schedule_cache_flush_locked(&mut state);
 }
@@ -333,13 +357,67 @@ fn enabled_snapshots_ordered_with_settings(
     ordered
         .into_iter()
         .filter(|id| is_enabled(id))
-        .filter_map(|id| snapshots.get(&id).cloned())
+        .flat_map(|id| enabled_snapshots_for_provider(snapshots, &id))
         .collect()
 }
 
-pub fn enabled_cached_snapshots() -> Vec<CachedPluginSnapshot> {
+fn enabled_snapshots_for_provider(
+    snapshots: &HashMap<String, CachedPluginSnapshot>,
+    provider_id: &str,
+) -> Vec<CachedPluginSnapshot> {
+    let mut matches: Vec<CachedPluginSnapshot> = snapshots
+        .values()
+        .filter(|snapshot| snapshot.provider_id == provider_id)
+        .cloned()
+        .collect();
+    matches.sort_by(|a, b| {
+        a.account_order
+            .cmp(&b.account_order)
+            .then_with(|| a.account_name.cmp(&b.account_name))
+            .then_with(|| a.instance_id.cmp(&b.instance_id))
+    });
+    matches
+}
+
+pub fn cached_snapshot_for_provider(provider_id: &str) -> Option<CachedPluginSnapshot> {
+    let state = cache_state().lock().expect("cache state poisoned");
+    state.snapshots.get(provider_id).cloned().or_else(|| {
+        enabled_snapshots_for_provider(&state.snapshots, provider_id)
+            .into_iter()
+            .next()
+    })
+}
+
+#[cfg(test)]
+fn enabled_cached_snapshots() -> Vec<CachedPluginSnapshot> {
     let state = cache_state().lock().expect("cache state poisoned");
     enabled_snapshots_ordered(&state)
+}
+
+pub fn enabled_cached_snapshots_fresh(max_age: Duration) -> Vec<CachedPluginSnapshot> {
+    let now = OffsetDateTime::now_utc();
+    let state = cache_state().lock().expect("cache state poisoned");
+    enabled_snapshots_ordered(&state)
+        .into_iter()
+        .filter(|snapshot| snapshot_is_fresh(snapshot, now, max_age))
+        .collect()
+}
+
+fn snapshot_is_fresh(
+    snapshot: &CachedPluginSnapshot,
+    now: OffsetDateTime,
+    max_age: Duration,
+) -> bool {
+    let Ok(fetched_at) = OffsetDateTime::parse(
+        &snapshot.fetched_at,
+        &time::format_description::well_known::Rfc3339,
+    ) else {
+        return false;
+    };
+    let Ok(age): Result<Duration, _> = (now - fetched_at).try_into() else {
+        return true;
+    };
+    age <= max_age
 }
 
 pub fn enabled_plugin_ids_ordered(app_data_dir: &Path, known_plugin_ids: &[String]) -> Vec<String> {
@@ -381,10 +459,25 @@ mod tests {
     fn make_snapshot(id: &str, name: &str) -> CachedPluginSnapshot {
         CachedPluginSnapshot {
             provider_id: id.to_string(),
+            instance_id: id.to_string(),
+            account_id: None,
+            account_name: None,
+            account_order: None,
             display_name: name.to_string(),
             plan: Some("Pro".to_string()),
             lines: vec![],
             fetched_at: "2026-03-26T08:15:30Z".to_string(),
+        }
+    }
+
+    fn make_snapshot_with_fetched_at(
+        id: &str,
+        name: &str,
+        fetched_at: &str,
+    ) -> CachedPluginSnapshot {
+        CachedPluginSnapshot {
+            fetched_at: fetched_at.to_string(),
+            ..make_snapshot(id, name)
         }
     }
 
@@ -400,6 +493,30 @@ mod tests {
             lines: vec![MetricLine::Text {
                 label: "Usage".to_string(),
                 value: "42%".to_string(),
+                color: None,
+                subtitle: None,
+            }],
+            icon_url: String::new(),
+        }
+    }
+
+    fn make_account_output(
+        provider_id: &str,
+        account_id: &str,
+        account_name: &str,
+        order: usize,
+    ) -> PluginOutput {
+        PluginOutput {
+            provider_id: provider_id.to_string(),
+            instance_id: format!("{}:{}", provider_id, account_id),
+            account_id: Some(account_id.to_string()),
+            account_name: Some(account_name.to_string()),
+            account_order: Some(order),
+            display_name: provider_id.to_string(),
+            plan: Some("Pro".to_string()),
+            lines: vec![MetricLine::Text {
+                label: "Usage".to_string(),
+                value: account_name.to_string(),
                 color: None,
                 subtitle: None,
             }],
@@ -485,6 +602,26 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_freshness_uses_fetched_at_age() {
+        let now = OffsetDateTime::parse(
+            "2026-06-18T10:05:00Z",
+            &time::format_description::well_known::Rfc3339,
+        )
+        .unwrap();
+        let fresh = make_snapshot_with_fetched_at("claude", "Claude", "2026-06-18T10:00:00Z");
+        let stale = make_snapshot_with_fetched_at("codex", "Codex", "2026-06-18T09:59:59Z");
+        let invalid = make_snapshot_with_fetched_at("cursor", "Cursor", "not-a-date");
+
+        assert!(snapshot_is_fresh(&fresh, now, Duration::from_secs(5 * 60)));
+        assert!(!snapshot_is_fresh(&stale, now, Duration::from_secs(5 * 60)));
+        assert!(!snapshot_is_fresh(
+            &invalid,
+            now,
+            Duration::from_secs(5 * 60)
+        ));
+    }
+
+    #[test]
     fn cache_file_round_trip() {
         let dir = temp_dir("cache");
         std::fs::create_dir_all(&dir).unwrap();
@@ -497,7 +634,52 @@ mod tests {
 
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded["claude"].provider_id, "claude");
+        assert_eq!(loaded["claude"].instance_id, "claude");
         assert_eq!(loaded["claude"].fetched_at, "2026-03-26T08:15:30Z");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_cache_migrates_missing_instance_id_from_cache_key() {
+        let dir = temp_dir("migrate-instance-id");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join(CACHE_FILE_NAME),
+            r#"{"version":1,"snapshots":{"codex":{"providerId":"codex","displayName":"Codex","plan":"Plus","lines":[],"fetchedAt":"2026-03-26T08:15:30Z"}}}"#,
+        )
+        .unwrap();
+
+        let loaded = load_cache(&dir);
+
+        assert_eq!(loaded["codex"].instance_id, "codex");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[serial]
+    fn cache_successful_output_keeps_multiple_profiles_for_one_provider() {
+        let dir = temp_dir("multi-profile-cache");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        init(&dir, vec!["codex".to_string()]);
+        cache_successful_output(&make_account_output("codex", "account-a", "A", 0));
+        cache_successful_output(&make_account_output("codex", "account-b", "B", 1));
+        flush_cache();
+
+        let loaded = load_cache(&dir);
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded.contains_key("codex:account-a"));
+        assert!(loaded.contains_key("codex:account-b"));
+
+        init(&dir, vec!["codex".to_string()]);
+        let snapshots = enabled_cached_snapshots();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[0].account_name.as_deref(), Some("A"));
+        assert_eq!(snapshots[1].account_name.as_deref(), Some("B"));
+
+        wait_for_cache_writer_idle();
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -624,6 +806,10 @@ mod tests {
     fn snapshot_with_progress_line_round_trips() {
         let snap = CachedPluginSnapshot {
             provider_id: "claude".to_string(),
+            instance_id: "claude".to_string(),
+            account_id: None,
+            account_name: None,
+            account_order: None,
             display_name: "Claude".to_string(),
             plan: Some("Max 20x".to_string()),
             lines: vec![crate::plugin_engine::runtime::MetricLine::Progress {

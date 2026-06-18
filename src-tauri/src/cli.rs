@@ -1,7 +1,9 @@
 use crate::{accounts, config, local_http_api, plugin_engine};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const APP_IDENTIFIER: &str = "com.sunstory.openusage";
+const CLI_CACHE_MAX_AGE: Duration = Duration::from_secs(5 * 60);
 const CLI_HELP: &str = "\
 OpenUsage CLI
 
@@ -63,10 +65,10 @@ pub fn handled_from_env() -> bool {
 }
 
 fn is_user_cli_entrypoint() -> bool {
-    let Ok(exe) = std::env::current_exe() else {
+    let Some(invoked_path) = std::env::args_os().next().map(PathBuf::from) else {
         return false;
     };
-    cli_path().is_ok_and(|path| paths_resolve_to_same_file(&path, &exe))
+    cli_path().is_ok_and(|path| paths_match_without_resolving_symlink(&path, &invoked_path))
 }
 
 fn parse_args(args: &[String]) -> Result<CliCommand, String> {
@@ -123,8 +125,10 @@ fn run_usage(refresh: bool) -> Result<String, String> {
         local_http_api::flush_cache();
     }
 
-    serde_json::to_string(&local_http_api::enabled_cached_snapshots())
-        .map_err(|error| format!("failed to serialize usage JSON: {}", error))
+    serde_json::to_string(&local_http_api::enabled_cached_snapshots_fresh(
+        CLI_CACHE_MAX_AGE,
+    ))
+    .map_err(|error| format!("failed to serialize usage JSON: {}", error))
 }
 
 fn refresh_enabled_plugins(
@@ -237,6 +241,28 @@ fn normalize_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn paths_match_without_resolving_symlink(left: &Path, right: &Path) -> bool {
+    let right = if right.is_absolute() {
+        right.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(right))
+            .unwrap_or_else(|_| right.to_path_buf())
+    };
+    normalize_parent_path(left) == normalize_parent_path(&right)
+}
+
+fn normalize_parent_path(path: &Path) -> PathBuf {
+    let Some(parent) = path.parent() else {
+        return path.to_path_buf();
+    };
+    parent
+        .canonicalize()
+        .map(|parent| parent.join(path.file_name().unwrap_or_default()))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
 fn paths_resolve_to_same_file(left: &Path, right: &Path) -> bool {
     normalize_path(left) == normalize_path(right)
 }
@@ -306,6 +332,30 @@ mod tests {
         std::fs::copy(&target, &cli).unwrap();
 
         assert!(paths_resolve_to_same_file(&cli, &target));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn cli_entrypoint_match_does_not_resolve_to_app_executable() {
+        let root = std::env::temp_dir().join(format!(
+            "openusage-cli-entry-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let bin_dir = root.join(".local/bin");
+        let app_dir = root.join("OpenUsage.app/Contents/MacOS");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        std::fs::create_dir_all(&app_dir).unwrap();
+        let cli = bin_dir.join("openusage");
+        let app_exe = app_dir.join("openusage");
+        std::fs::write(&cli, "").unwrap();
+        std::fs::write(&app_exe, "").unwrap();
+
+        assert!(paths_match_without_resolving_symlink(&cli, &cli));
+        assert!(!paths_match_without_resolving_symlink(&cli, &app_exe));
 
         let _ = std::fs::remove_dir_all(&root);
     }

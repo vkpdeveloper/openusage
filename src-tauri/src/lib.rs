@@ -285,9 +285,7 @@ fn start_codex_oauth(
 }
 
 #[tauri::command]
-fn get_codex_oauth_status(
-    session_id: String,
-) -> Result<codex_oauth::OAuthSession, String> {
+fn get_codex_oauth_status(session_id: String) -> Result<codex_oauth::OAuthSession, String> {
     codex_oauth::status(&session_id)
 }
 

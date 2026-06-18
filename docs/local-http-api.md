@@ -11,6 +11,7 @@ The server starts automatically with the app. If the port is already in use, the
 ### `GET /v1/usage`
 
 Returns an array of cached usage snapshots for all **enabled** providers, ordered by your plugin settings.
+Providers with multiple saved profiles return one snapshot per profile.
 
 - **200 OK** — JSON array (may be empty `[]` if no cached data exists yet).
 
@@ -33,6 +34,10 @@ Unknown routes return **404 Not Found**.
 ```json
 {
   "providerId": "claude",
+  "instanceId": "claude:account-id",
+  "accountId": "account-id",
+  "accountName": "Work",
+  "accountOrder": 0,
   "displayName": "Claude",
   "plan": "Team 5x",
   "lines": [
@@ -77,6 +82,7 @@ The `lines` array uses the same metric line types as the internal plugin output:
 ## Filtering and Caching Behavior
 
 - The collection endpoint (`/v1/usage`) returns **enabled providers only**, in the order defined by your plugin settings.
+- Multi-profile providers return all cached profiles for that provider, ordered by the app's saved account order.
 - Only **successful** probe results are cached. A failed probe never overwrites a previous successful snapshot.
 - The single-provider endpoint (`/v1/usage/:providerId`) works for any known provider, including disabled ones.
 

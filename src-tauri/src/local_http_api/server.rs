@@ -1,8 +1,8 @@
-use super::cache::{cache_state, enabled_snapshots_ordered};
+use super::cache::{cache_state, cached_snapshot_for_provider, enabled_snapshots_ordered};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 const BIND_ADDR: &str = "127.0.0.1:6736";
@@ -171,9 +171,11 @@ fn handle_get_usage_single(provider_id: &str) -> String {
         return response_not_found("provider_not_found");
     }
 
-    match state.snapshots.get(provider_id) {
+    drop(state);
+
+    match cached_snapshot_for_provider(provider_id) {
         Some(snapshot) => {
-            let body = serde_json::to_string(snapshot).unwrap_or_else(|_| "{}".to_string());
+            let body = serde_json::to_string(&snapshot).unwrap_or_else(|_| "{}".to_string());
             response_json(200, "OK", &body)
         }
         None => response_no_content(),
@@ -224,13 +226,17 @@ fn response_service_unavailable() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::cache::{cache_state, CachedPluginSnapshot};
+    use super::super::cache::{CachedPluginSnapshot, cache_state};
     use super::*;
     use serial_test::serial;
 
     fn make_snapshot(id: &str, name: &str) -> CachedPluginSnapshot {
         CachedPluginSnapshot {
             provider_id: id.to_string(),
+            instance_id: id.to_string(),
+            account_id: None,
+            account_name: None,
+            account_order: None,
             display_name: name.to_string(),
             plan: Some("Pro".to_string()),
             lines: vec![],
